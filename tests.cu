@@ -92,3 +92,17 @@ TEST_F(MatmulTest, BlockTiling2DTransposed) {
   cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
   cmp(result, expected);
 }
+
+TEST_F(MatmulTest, VectorizedGMEM) {
+  matmulVectorizedGMEM(M, N, K, devA, devB, devC);
+  cudaDeviceSynchronize();
+  cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+  cmp(result, expected);
+}
+
+TEST_F(MatmulTest, Warptiling) {
+  matmulWarptiling(M, N, K, devA, devB, devC);
+  cudaDeviceSynchronize();
+  cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+  cmp(result, expected);
+}

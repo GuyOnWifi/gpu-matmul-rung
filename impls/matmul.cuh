@@ -26,3 +26,9 @@ void matmulBlockTiling2D(int M, int N, int K, const float *A, const float *B,
 
 void matmulBlockTiling2DTransposed(int M, int N, int K, const float *A,
                                    const float *B, float *C);
+
+void matmulVectorizedGMEM(int M, int N, int K, const float *A, const float *B,
+                          float *C);
+
+void matmulWarptiling(int M, int N, int K, const float *A, const float *B,
+                      float *C);

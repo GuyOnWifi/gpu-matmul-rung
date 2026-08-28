@@ -70,3 +70,8 @@ std::array<float *, 3> init_matrixes_alloc(int M, int N, int K) {
 
   return {devA, devB, devC};
 }
+
+std::array<float *, 3> shared_matrixes(int M, int N, int K) {
+  static std::array<float *, 3> ptrs = init_matrixes_alloc(M, N, K);
+  return ptrs;
+}
