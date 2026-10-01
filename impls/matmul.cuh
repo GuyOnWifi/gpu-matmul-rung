@@ -32,3 +32,9 @@ void matmulVectorizedGMEM(int M, int N, int K, const float *A, const float *B,
 
 void matmulWarptiling(int M, int N, int K, const float *A, const float *B,
                       float *C);
+
+void matmulPrefetch(int M, int N, int K, const float *A, const float *B,
+                    float *C);
+
+void matmulPrefetchReg(int M, int N, int K, const float *A, const float *B,
+                       float *C);

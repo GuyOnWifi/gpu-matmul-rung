@@ -15,7 +15,6 @@ FetchContent_Declare(
   nvbench
   GIT_REPOSITORY https://github.com/NVIDIA/nvbench
   GIT_TAG 66212f1da71cc9afb2894a46fa8f234cbdd6c0d8
-  GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(nvbench)
 
@@ -23,7 +22,6 @@ FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest
   GIT_TAG v1.18.0
-  GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(googletest)
 
@@ -43,8 +41,13 @@ target_link_libraries(tests PRIVATE matmul GTest::gtest_main)
 add_executable(profile profile.cu)
 target_link_libraries(profile PRIVATE matmul)
 
+add_executable(autotune autotune.cu)
+target_link_libraries(autotune PRIVATE matmul nvbench::nvbench nvbench::main)
+target_compile_options(autotune PRIVATE -O3 -g)
+
 target_compile_options(matmul PRIVATE -O3 -g -lineinfo)
 target_compile_options(benches PRIVATE -O3 -g)
 target_compile_options(tests PRIVATE -O3 -g)
+target_compile_options(profile PRIVATE -O3 -g)
 
 # target_link_options(tests PRIVATE -fsanitize=address)

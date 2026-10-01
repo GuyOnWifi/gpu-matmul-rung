@@ -1,0 +1,153 @@
+#pragma once
+#include <cuda_runtime.h>
+
+#define LOAD_NEXT_SMEM()                                                       \
+  for (int i = 0; i < BM; i += BM / PACK_A) {                                  \
+    float4 tmp = reinterpret_cast<const float4 *>(                             \
+        &A[(trow_a + i) * K + tcol_a * 4])[0];                                 \
+    As_next[(tcol_a * 4 + 0) * BM + trow_a + i] = tmp.x;                       \
+    As_next[(tcol_a * 4 + 1) * BM + trow_a + i] = tmp.y;                       \
+    As_next[(tcol_a * 4 + 2) * BM + trow_a + i] = tmp.z;                       \
+    As_next[(tcol_a * 4 + 3) * BM + trow_a + i] = tmp.w;                       \
+  }                                                                            \
+                                                                               \
+  for (int i = 0; i < BK; i += BK / PACK_B) {                                  \
+    reinterpret_cast<float4 *>(&Bs_next[(trow_b + i) * BN + tcol_b * 4])[0] =  \
+        reinterpret_cast<const float4 *>(                                      \
+            &B[(trow_b + i) * N + tcol_b * 4])[0];                             \
+  }                                                                            \
+  A += BK;                                                                     \
+  B += BK * N;
+
+__device__ static void swap(float *&a, float *&b) {
+  float *tmp = a;
+  a = b;
+  b = tmp;
+}
+
+// 08_warptiling.cu, templated on its config so it can be swept.
+// Body is a faithful translation -- same indexing, same loop structure, same
+// write-only epilogue. Only the constants became template parameters.
+//
+//   BM,BN,BK   block tile
+//   TM,TN      thread tile
+//   WM,WN      warp tile
+//   WNITER     warp sub-tiles along N (MWITER is derived from it)
+
+template <int BM, int BN, int BK, int TM, int TN, int WM, int WN, int WNITER>
+__global__ void PrefetchTpl(int M, int N, int K, const float *A, const float *B,
+                            float *C) {
+  constexpr int WARPSIZE = 32;
+  constexpr int MWITER = (WM * WN) / (WARPSIZE * TM * TN * WNITER);
+  constexpr int NSUB = WN / WNITER;
+  constexpr int MSUB = WM / MWITER;
+  constexpr int NUM_THREADS = BM / WM * BN / WN * WARPSIZE;
+  constexpr int PACK_A = BM * BK / 4 / NUM_THREADS;
+  constexpr int PACK_B = BK * BN / 4 / NUM_THREADS;
+
+  __shared__ float As_arr[BM * BK];
+  __shared__ float Bs_arr[BK * BN];
+
+  __shared__ float As_next_arr[BM * BK];
+  __shared__ float Bs_next_arr[BK * BN];
+
+  float *As = As_arr;
+  float *Bs = Bs_arr;
+  float *As_next = As_next_arr;
+  float *Bs_next = Bs_next_arr;
+
+  int trow_a = threadIdx.x / (BK / 4);
+  int tcol_a = threadIdx.x % (BK / 4);
+
+  int trow_b = threadIdx.x / (BN / 4);
+  int tcol_b = threadIdx.x % (BN / 4);
+
+  int warp_idx = threadIdx.x / WARPSIZE;
+  int warp_col = warp_idx % (BN / WN);
+  int warp_row = warp_idx / (BN / WN);
+
+  int thread_warp_idx = threadIdx.x % WARPSIZE;
+  int tcol_warp = thread_warp_idx % (NSUB / TN);
+  int trow_warp = thread_warp_idx / (NSUB / TN);
+
+  A += blockIdx.x * BM * K;
+  B += blockIdx.y * BN;
+  C += (blockIdx.x * BM + warp_row * WM) * N + blockIdx.y * BN + warp_col * WN;
+
+  float acc[MWITER * TM * WNITER * TN] = {0.0f};
+  float cacheM[MWITER * TM] = {0.0f};
+  float cacheN[WNITER * TN] = {0.0f};
+
+  LOAD_NEXT_SMEM()
+  swap(As, As_next);
+  swap(Bs, Bs_next);
+
+  __syncthreads();
+
+  for (int blk = 0; blk < K; blk += BK) {
+
+    if (blk + BK < K) {
+      LOAD_NEXT_SMEM()
+    }
+
+    for (int dot_idx = 0; dot_idx < BK; dot_idx++) {
+      for (int warp_idx_m = 0; warp_idx_m < MWITER; warp_idx_m++) {
+        for (int idx_m = 0; idx_m < TM; idx_m++) {
+          cacheM[warp_idx_m * TM + idx_m] =
+              As[dot_idx * BM + warp_row * WM + warp_idx_m * MSUB +
+                 (trow_warp * TM + idx_m)];
+        }
+      }
+
+      for (int warp_idx_n = 0; warp_idx_n < WNITER; warp_idx_n++) {
+        for (int idx_n = 0; idx_n < TN; idx_n++) {
+          cacheN[warp_idx_n * TN + idx_n] =
+              Bs[dot_idx * BN + warp_col * WN + warp_idx_n * NSUB +
+                 (tcol_warp * TN) + idx_n];
+        }
+      }
+
+      for (int wsr = 0; wsr < MWITER; wsr++) {
+        for (int wsc = 0; wsc < WNITER; wsc++) {
+          for (int res_idx_m = 0; res_idx_m < TM; res_idx_m++) {
+            for (int res_idx_n = 0; res_idx_n < TN; res_idx_n++) {
+              acc[(res_idx_m + TM * wsr) * (TN * WNITER) +
+                  (res_idx_n + wsc * TN)] +=
+                  cacheM[res_idx_m + TM * wsr] * cacheN[res_idx_n + TN * wsc];
+            }
+          }
+        }
+      }
+    }
+
+    swap(As, As_next);
+    swap(Bs, Bs_next);
+
+    __syncthreads();
+  }
+
+  // Write-only epilogue -- C is never read.
+  for (int wsr = 0; wsr < MWITER; wsr++) {
+    for (int wsc = 0; wsc < WNITER; wsc++) {
+      float *C_tmp = C + wsr * MSUB * N + wsc * NSUB;
+      for (int i = 0; i < TM; i++) {
+        for (int j = 0; j < TN; j += 4) {
+          const int idx = (wsr * TM + i) * WNITER * TN + wsc * TN + j;
+          float4 tmp = {acc[idx + 0], acc[idx + 1], acc[idx + 2], acc[idx + 3]};
+          reinterpret_cast<float4 *>(
+              &C_tmp[(trow_warp * TM + i) * N + tcol_warp * TN + j])[0] = tmp;
+        }
+      }
+    }
+  }
+}
+
+template <int BM, int BN, int BK, int TM, int TN, int WM, int WN, int WNITER>
+void launchPrefetchTpl(int M, int N, int K, const float *A, const float *B,
+                       float *C) {
+  constexpr int NUM_THREADS = BM / WM * BN / WN * 32;
+  dim3 grid((M + BM - 1) / BM, (N + BN - 1) / BN);
+  dim3 block(NUM_THREADS);
+  PrefetchTpl<BM, BN, BK, TM, TN, WM, WN, WNITER>
+      <<<grid, block>>>(M, N, K, A, B, C);
+}

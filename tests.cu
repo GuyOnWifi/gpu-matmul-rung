@@ -106,3 +106,17 @@ TEST_F(MatmulTest, Warptiling) {
   cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
   cmp(result, expected);
 }
+
+TEST_F(MatmulTest, Prefetch) {
+  matmulPrefetch(M, N, K, devA, devB, devC);
+  cudaDeviceSynchronize();
+  cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+  cmp(result, expected);
+}
+
+TEST_F(MatmulTest, PrefetchReg) {
+  matmulPrefetchReg(M, N, K, devA, devB, devC);
+  cudaDeviceSynchronize();
+  cudaMemcpy(result, devC, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+  cmp(result, expected);
+}

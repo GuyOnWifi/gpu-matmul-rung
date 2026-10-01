@@ -10,34 +10,23 @@
 #include <cstdlib>
 #include <cstring>
 
+const int M = 4096;
+const int N = 4096;
+const int K = 4096;
+
 int main(int argc, char **argv) {
-  const char *which = argc > 1 ? argv[1] : "1d";
-  const int S = argc > 2 ? std::atoi(argv[2]) : 1024;
-  const int M = S, N = S, K = S;
 
   auto ptrs = init_matrixes_alloc(M, N, K);
   const float *A = ptrs[0];
   const float *B = ptrs[1];
   float *C = ptrs[2];
 
-  if (strcmp(which, "naive") == 0) {
-    matmulNaive(M, N, K, A, B, C);
-  } else if (strcmp(which, "gmem") == 0) {
-    matmulGMEMCoalesced(M, N, K, A, B, C);
-  } else if (strcmp(which, "smem") == 0) {
-    matmulSMEMCoalesced(M, N, K, A, B, C);
-  } else if (strcmp(which, "1d") == 0) {
-    matmulBlockTiling1D(M, N, K, A, B, C);
-  } else {
-    fprintf(stderr, "unknown kernel '%s' (naive|gmem|smem|1d)\n", which);
-    return 1;
-  }
+  matmulWarptiling(M, N, K, A, B, C);
 
   cudaError_t err = cudaDeviceSynchronize();
   if (err != cudaSuccess) {
     fprintf(stderr, "%s\n", cudaGetErrorString(err));
     return 1;
   }
-  printf("%s at %d^3 ok\n", which, S);
   return 0;
 }
